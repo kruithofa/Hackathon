@@ -3,6 +3,7 @@ import os
 import pyaudio
 import torchaudio
 import azure.cognitiveservices.speech as speechsdk
+import time
 
 speech_key, service_region = os.environ['SPEECH_KEY'], os.environ['SPEECH_REGION']
 from_language, to_languages = 'en-US', [ 'de', 'fr']
@@ -56,13 +57,21 @@ def synthesize_one_language(translation, language, audio_config):
     speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
     return speech_synthesizer.speak_text_async(translation).get()          
 
+def show_time(last_time):
+    elapsed_time = time.clock_gettime_ns(time.CLOCK_PROCESS_CPUTIME_ID)
+    print(f'Time since last call "{elapsed_time-last_time}"')
+    return elapsed_time
 
+time_stamp = show_time(0)
 translationspeech = {}
+mono_enabled = False
 # Set up PyAudio
 print("Setting up audio")
 p = pyaudio.PyAudio()
-
+time_stamp = show_time(time_stamp)
 translated_speech = translate_speech_to_text()
+time_stamp = show_time(time_stamp)
+
 for language in translated_speech.translations: 
     # Set up the audio stream
     pull_stream = speechsdk.audio.PullAudioOutputStream()
@@ -71,14 +80,13 @@ for language in translated_speech.translations:
     translationspeech[language] = synthesize_one_language(translation = translated_speech.translations[language], language = language, audio_config = output_destination)
 
 print("Now the data is synthesized")
-
+time_stamp = show_time(time_stamp)
 print("Now we combine left and right")
 wfm_length=len(translationspeech[to_languages[0]].audio_data)
 wfm_length = min(wfm_length, len(translationspeech[to_languages[1]].audio_data))
 #wfm_length = 65535
 #for language in translated_speech.translations:
 #    wfm_length = min(wfm_length, len(translationspeech[language].audio_data))
-print(wfm_length)
 left_stream = translationspeech[to_languages[0]].audio_data[44:]
 right_stream = translationspeech[to_languages[1]].audio_data[44:]
 stereo_stream = [0] * 4*wfm_length
@@ -90,31 +98,31 @@ while offset < wfm_length-8:
     stereo_stream[offset*2+2] = right_stream[offset]
     stereo_stream[offset*2+3] = right_stream[offset+1]
     offset += 2
-    if ((offset % 1000) == 0):
-        print(offset)
+print("Data is combined")
+time_stamp = show_time(time_stamp)
+if (mono_enabled):
+    print("Opening stream")
+    stream = p.open(format=p.get_format_from_width(2), channels=1, rate=16000, output=True)
 
-print("Opening stream")
-stream = p.open(format=p.get_format_from_width(2), channels=1, rate=16000, output=True)
+    chunk_size = 256
+    offset = 0
+    while offset < len(left_stream):
+        chunk = left_stream[offset:offset + chunk_size]
+        stream.write(chunk)
+        offset += chunk_size
 
-chunk_size = 256
-offset = 0
-while offset < len(left_stream):
-    chunk = left_stream[offset:offset + chunk_size]
-    stream.write(chunk)
-    offset += chunk_size
+    chunk_size = 256
+    offset = 0
+    while offset < len(left_stream):
+        chunk = right_stream[offset:offset + chunk_size]
+        stream.write(chunk)
+        offset += chunk_size
 
-chunk_size = 256
-offset = 0
-while offset < len(left_stream):
-    chunk = right_stream[offset:offset + chunk_size]
-    stream.write(chunk)
-    offset += chunk_size
-
-stream.stop_stream()
-stream.close()
+    stream.stop_stream()
+    stream.close()
 
 stream = p.open(format=p.get_format_from_width(2), channels=2, rate=16000, output=True)
-
+time_stamp = show_time(time_stamp)
 chunk_size = 256
 offset = 0
 while offset < len(stereo_stream):
@@ -124,7 +132,8 @@ while offset < len(stereo_stream):
 
 stream.stop_stream()
 stream.close()
-
+print("And now we are done")
+time_stamp = show_time(time_stamp)
 #for language in translated_speech.translations:
 #    audio_data = translationspeech[language].audio_data
 # 
