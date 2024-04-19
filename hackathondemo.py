@@ -1,6 +1,7 @@
 import os
 # import sounddevice
 import pyaudio
+import torchaudio
 import azure.cognitiveservices.speech as speechsdk
 
 speech_key, service_region = os.environ['SPEECH_KEY'], os.environ['SPEECH_REGION']
@@ -60,8 +61,6 @@ translationspeech = {}
 # Set up PyAudio
 print("Setting up audio")
 p = pyaudio.PyAudio()
-print("Opening stream")
-stream = p.open(format=p.get_format_from_width(2), channels=1, rate=16000, output=True)
 
 translated_speech = translate_speech_to_text()
 for language in translated_speech.translations: 
@@ -73,21 +72,74 @@ for language in translated_speech.translations:
 
 print("Now the data is synthesized")
 
-for language in translated_speech.translations:
-    audio_data = translationspeech[language].audio_data
-  
-    print("Sending data to audio")
-    chunk_size = 256  # Adjust the chunk size as needed
-    offset = 0
-    while offset < len(audio_data):
-        chunk = audio_data[offset:offset + chunk_size]
-        stream.write(chunk)
-        offset += chunk_size
+print("Now we combine left and right")
+wfm_length=len(translationspeech[to_languages[0]].audio_data)
+wfm_length = min(wfm_length, len(translationspeech[to_languages[1]].audio_data))
+#wfm_length = 65535
+#for language in translated_speech.translations:
+#    wfm_length = min(wfm_length, len(translationspeech[language].audio_data))
+print(wfm_length)
+left_stream = translationspeech[to_languages[0]].audio_data[44:]
+right_stream = translationspeech[to_languages[1]].audio_data[44:]
+stereo_stream = [0] * 4*wfm_length
+wfm_length -= 44 # because of header
+offset = 0
+while offset < wfm_length-8:
+    stereo_stream[offset*2] = left_stream[offset]
+    stereo_stream[offset*2+1] = left_stream[offset+1]
+    stereo_stream[offset*2+2] = right_stream[offset]
+    stereo_stream[offset*2+3] = right_stream[offset+1]
+    offset += 2
+    if ((offset % 1000) == 0):
+        print(offset)
+
+print("Opening stream")
+stream = p.open(format=p.get_format_from_width(2), channels=1, rate=16000, output=True)
+
+chunk_size = 256
+offset = 0
+while offset < len(left_stream):
+    chunk = left_stream[offset:offset + chunk_size]
+    stream.write(chunk)
+    offset += chunk_size
+
+chunk_size = 256
+offset = 0
+while offset < len(left_stream):
+    chunk = right_stream[offset:offset + chunk_size]
+    stream.write(chunk)
+    offset += chunk_size
+
+stream.stop_stream()
+stream.close()
+
+stream = p.open(format=p.get_format_from_width(2), channels=2, rate=16000, output=True)
+
+chunk_size = 256
+offset = 0
+while offset < len(stereo_stream):
+    chunk = stereo_stream[offset:offset + chunk_size]
+    stream.write(bytes(chunk))
+    offset += chunk_size
+
+stream.stop_stream()
+stream.close()
+
+#for language in translated_speech.translations:
+#    audio_data = translationspeech[language].audio_data
+# 
+#    metadata = torchaudio.info(audio_data)
+#    print(metadata)
+#    print("Sending data to audio")
+###    chunk_size = 256  # Adjust the chunk size as needed
+#    offset = 0
+#    while offset < len(audio_data):
+#        chunk = audio_data[offset:offset + chunk_size]
+#        stream.write(chunk)
+#        offset += chunk_size
 
 
 # Clean up
-stream.stop_stream()
-stream.close()
 p.terminate()
 
 
