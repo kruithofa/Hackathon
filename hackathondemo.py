@@ -62,78 +62,83 @@ def show_time(last_time):
     print(f'Time since last call "{elapsed_time-last_time}"')
     return elapsed_time
 
-time_stamp = show_time(0)
-translationspeech = {}
-mono_enabled = False
-# Set up PyAudio
-print("Setting up audio")
-p = pyaudio.PyAudio()
-time_stamp = show_time(time_stamp)
-translated_speech = translate_speech_to_text()
-time_stamp = show_time(time_stamp)
+def do_one_translation():
 
-for language in translated_speech.translations: 
-    # Set up the audio stream
-    pull_stream = speechsdk.audio.PullAudioOutputStream()
-    output_destination = speechsdk.audio.AudioOutputConfig(stream = pull_stream)
 
-    translationspeech[language] = synthesize_one_language(translation = translated_speech.translations[language], language = language, audio_config = output_destination)
+    time_stamp = show_time(0)
+    translationspeech = {}
+    mono_enabled = False
+    # Set up PyAudio
+    print("Setting up audio")
+    p = pyaudio.PyAudio()
+    time_stamp = show_time(time_stamp)
+    translated_speech = translate_speech_to_text()
+    time_stamp = show_time(time_stamp)
 
-print("Now the data is synthesized")
-time_stamp = show_time(time_stamp)
-print("Now we combine left and right")
-wfm_length=len(translationspeech[to_languages[0]].audio_data)
-wfm_length = min(wfm_length, len(translationspeech[to_languages[1]].audio_data))
-#wfm_length = 65535
-#for language in translated_speech.translations:
-#    wfm_length = min(wfm_length, len(translationspeech[language].audio_data))
-left_stream = translationspeech[to_languages[0]].audio_data[44:]
-right_stream = translationspeech[to_languages[1]].audio_data[44:]
-stereo_stream = [0] * 4*wfm_length
-wfm_length -= 44 # because of header
-offset = 0
-while offset < wfm_length-8:
-    stereo_stream[offset*2] = left_stream[offset]
-    stereo_stream[offset*2+1] = left_stream[offset+1]
-    stereo_stream[offset*2+2] = right_stream[offset]
-    stereo_stream[offset*2+3] = right_stream[offset+1]
-    offset += 2
-print("Data is combined")
-time_stamp = show_time(time_stamp)
-if (mono_enabled):
-    print("Opening stream")
-    stream = p.open(format=p.get_format_from_width(2), channels=1, rate=16000, output=True)
+    for language in translated_speech.translations: 
+        # Set up the audio stream
+        pull_stream = speechsdk.audio.PullAudioOutputStream()
+        output_destination = speechsdk.audio.AudioOutputConfig(stream = pull_stream)
 
+        translationspeech[language] = synthesize_one_language(translation = translated_speech.translations[language], language = language, audio_config = output_destination)
+
+    print("Now the data is synthesized")
+    time_stamp = show_time(time_stamp)
+    print("Now we combine left and right")
+    wfm_length=len(translationspeech[to_languages[0]].audio_data)
+    wfm_length = min(wfm_length, len(translationspeech[to_languages[1]].audio_data))
+    #wfm_length = 65535
+    #for language in translated_speech.translations:
+    #    wfm_length = min(wfm_length, len(translationspeech[language].audio_data))
+    left_stream = translationspeech[to_languages[0]].audio_data[44:]
+    right_stream = translationspeech[to_languages[1]].audio_data[44:]
+    stereo_stream = [0] * 4*wfm_length
+    wfm_length -= 44 # because of header
+    offset = 0
+    while offset < wfm_length-8:
+        stereo_stream[offset*2] = left_stream[offset]
+        stereo_stream[offset*2+1] = left_stream[offset+1]
+        stereo_stream[offset*2+2] = right_stream[offset]
+        stereo_stream[offset*2+3] = right_stream[offset+1]
+        offset += 2
+    print("Data is combined")
+    time_stamp = show_time(time_stamp)
+    if (mono_enabled):
+        print("Opening stream")
+        stream = p.open(format=p.get_format_from_width(2), channels=1, rate=16000, output=True)
+
+        chunk_size = 256
+        offset = 0
+        while offset < len(left_stream):
+            chunk = left_stream[offset:offset + chunk_size]
+            stream.write(chunk)
+            offset += chunk_size
+
+        chunk_size = 256
+        offset = 0
+        while offset < len(left_stream):
+            chunk = right_stream[offset:offset + chunk_size]
+            stream.write(chunk)
+            offset += chunk_size
+
+        stream.stop_stream()
+        stream.close()
+
+    stream = p.open(format=p.get_format_from_width(2), channels=2, rate=16000, output=True)
+    time_stamp = show_time(time_stamp)
     chunk_size = 256
     offset = 0
-    while offset < len(left_stream):
-        chunk = left_stream[offset:offset + chunk_size]
-        stream.write(chunk)
-        offset += chunk_size
-
-    chunk_size = 256
-    offset = 0
-    while offset < len(left_stream):
-        chunk = right_stream[offset:offset + chunk_size]
-        stream.write(chunk)
+    while offset < len(stereo_stream):
+        chunk = stereo_stream[offset:offset + chunk_size]
+        stream.write(bytes(chunk))
         offset += chunk_size
 
     stream.stop_stream()
     stream.close()
+    print("And now we are done")
+    time_stamp = show_time(time_stamp)
+    p.terminate()
 
-stream = p.open(format=p.get_format_from_width(2), channels=2, rate=16000, output=True)
-time_stamp = show_time(time_stamp)
-chunk_size = 256
-offset = 0
-while offset < len(stereo_stream):
-    chunk = stereo_stream[offset:offset + chunk_size]
-    stream.write(bytes(chunk))
-    offset += chunk_size
-
-stream.stop_stream()
-stream.close()
-print("And now we are done")
-time_stamp = show_time(time_stamp)
 #for language in translated_speech.translations:
 #    audio_data = translationspeech[language].audio_data
 # 
@@ -149,7 +154,9 @@ time_stamp = show_time(time_stamp)
 
 
 # Clean up
-p.terminate()
+for i in range(5):
+    print(f'Iteration"{i}"')
+    do_one_translation()
 
 
 
